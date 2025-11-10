@@ -1,0 +1,218 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Instructor <ar-lab@example.com>
+Date: Mon, 10 Nov 2025 14:53:00 +0800
+Subject: [ARLab] Basic AR UI/UX workflow scaffold
+
+---
+ ARLabUI/ARLabUIApp.swift       | 15 +++++++++++++++
+ ARLabUI/ContentView.swift      | 38 +++++++++++++++++++++++++++++++++++++
+ ARLabUI/ARManager.swift        | 38 +++++++++++++++++++++++++++++++++++++
+ ARLabUI/VirtualObject.swift    | 15 +++++++++++++++
+ ARLabUI/MockARView.swift       | 25 +++++++++++++++++++++++++
+ ARLabUI/Persistence.swift      | 27 +++++++++++++++++++++++++++
+ ARLabUI/ARUIOverlay.swift      | 22 ++++++++++++++++++++++
+ 7 files changed, 180 insertions(+)
+ create mode 100644 ARLabUI/ARLabUIApp.swift
+ create mode 100644 ARLabUI/ContentView.swift
+ create mode 100644 ARLabUI/ARManager.swift
+ create mode 100644 ARLabUI/VirtualObject.swift
+ create mode 100644 ARLabUI/MockARView.swift
+ create mode 100644 ARLabUI/Persistence.swift
+ create mode 100644 ARLabUI/ARUIOverlay.swift
+
+diff --git a/ARLabUI/ARLabUIApp.swift b/ARLabUI/ARLabUIApp.swift
+new file mode 100644
+index 0000000..f85be38
+--- /dev/null
++++ b/ARLabUI/ARLabUIApp.swift
+@@
++import SwiftUI
++
++@main
++struct ARLabUIApp: App {
++    @StateObject private var arManager = ARManager()
++
++    var body: some Scene {
++        WindowGroup {
++            ContentView()
++                .environmentObject(arManager)
++        }
++    }
++}
+diff --git a/ARLabUI/ContentView.swift b/ARLabUI/ContentView.swift
+new file mode 100644
+index 0000000..ad24bcf
+--- /dev/null
++++ b/ARLabUI/ContentView.swift
+@@
++import SwiftUI
++
++struct ContentView: View {
++    @State var useMockAR: Bool = true
++    @EnvironmentObject var arManager: ARManager
++
++    var body: some View {
++        NavigationView {
++            VStack(spacing: 0) {
++                Text("AR Lab UI Demo")
++                    .font(.largeTitle)
++                    .padding()
++                Picker("AR Mode", selection: $useMockAR) {
++                    Text("Simulator (Mock)").tag(true)
++                    Text("Device Only (ARKit)").tag(false)
++                }
++                .pickerStyle(SegmentedPickerStyle())
++                .padding()
++                ZStack {
++                    if useMockAR {
++                        MockARView()
++                            .environmentObject(arManager)
++                    } else {
++                        Text("Replace with Real AR View (for device)")
++                            .frame(maxWidth: .infinity, maxHeight: .infinity)
++                            .background(Color(.secondarySystemBackground))
++                    }
++                    ARUIOverlay()
++                        .environmentObject(arManager)
++                        .padding()
++                }
++                .background(Color(.systemBackground))
++                .cornerRadius(12)
++                .padding()
++            }
++            .onAppear { arManager.load() }
++        }
++    }
++}
+diff --git a/ARLabUI/ARManager.swift b/ARLabUI/ARManager.swift
+new file mode 100644
+index 0000000..ed3a018
+--- /dev/null
++++ b/ARLabUI/ARManager.swift
+@@
++import SwiftUI
++
++class ARManager: ObservableObject {
++    @Published var objects: [VirtualObject] = []
++    @Published var selected: UUID? = nil
++
++    func addObject() {
++        let newObj = VirtualObject(name: "Cube", position: .zero, isPlaced: false)
++        objects.append(newObj)
++        save()
++    }
++    func reset() {
++        objects.removeAll()
++        selected = nil
++        save()
++    }
++    func placeObject(at pos: CGPoint) {
++        guard let idx = objects.firstIndex(where: { !$0.isPlaced }) else { return }
++        objects[idx].isPlaced = true
++        objects[idx].position = SIMD3<Float>(Float(pos.x), Float(pos.y), 0)
++        save()
++    }
++    func load() {
++        objects = Persistence.load()
++    }
++    func save() {
++        Persistence.save(objects)
++    }
++}
+diff --git a/ARLabUI/VirtualObject.swift b/ARLabUI/VirtualObject.swift
+new file mode 100644
+index 0000000..adcd59d
+--- /dev/null
++++ b/ARLabUI/VirtualObject.swift
+@@
++import Foundation
++import simd
++
++struct VirtualObject: Identifiable, Codable {
++    let id: UUID = UUID()
++    var name: String
++    var position: SIMD3<Float>
++    var isPlaced: Bool
++}
+diff --git a/ARLabUI/MockARView.swift b/ARLabUI/MockARView.swift
+new file mode 100644
+index 0000000..0dfde7d
+--- /dev/null
++++ b/ARLabUI/MockARView.swift
+@@
++import SwiftUI
++
++struct MockARView: View {
++    @EnvironmentObject var arManager: ARManager
++
++    var body: some View {
++        GeometryReader { geo in
++            ZStack {
++                Color(.systemGray6)
++                Text("Simulator Placeholder for AR Scene")
++                    .foregroundColor(.gray)
++                ForEach(arManager.objects) { obj in
++                    if obj.isPlaced {
++                        RoundedRectangle(cornerRadius: 10)
++                            .fill(Color.blue.opacity(0.7))
++                            .frame(width: 40, height: 40)
++                            .position(x: CGFloat(obj.position.x), y: CGFloat(obj.position.y))
++                    }
++                }
++            }
++            .gesture(
++                TapGesture()
++                    .onEnded { pos in
++                        let center = CGPoint(x: geo.size.width/2, y: geo.size.height/2)
++                        arManager.placeObject(at: center)
++                    }
++            )
++        }
++    }
++}
+diff --git a/ARLabUI/Persistence.swift b/ARLabUI/Persistence.swift
+new file mode 100644
+index 0000000..23adf88
+--- /dev/null
++++ b/ARLabUI/Persistence.swift
+@@
++import Foundation
++
++enum Persistence {
++    static let key = "arLab_objects"
++    static func save(_ objs: [VirtualObject]) {
++        let encoder = JSONEncoder()
++        if let data = try? encoder.encode(objs) {
++            UserDefaults.standard.set(data, forKey: key)
++        }
++    }
++    static func load() -> [VirtualObject] {
++        guard let data = UserDefaults.standard.data(forKey: key),
++            let objs = try? JSONDecoder().decode([VirtualObject].self, from: data)
++            else { return [] }
++        return objs
++    }
++}
+diff --git a/ARLabUI/ARUIOverlay.swift b/ARLabUI/ARUIOverlay.swift
+new file mode 100644
+index 0000000..5fa2c4d
+--- /dev/null
++++ b/ARLabUI/ARUIOverlay.swift
+@@
++import SwiftUI
++
++struct ARUIOverlay: View {
++    @EnvironmentObject var arManager: ARManager
++    var body: some View {
++        HStack(spacing: 16) {
++            Button("Add Object") { arManager.addObject() }
++                .buttonStyle(.borderedProminent)
++            Button("Reset") { arManager.reset() }
++                .buttonStyle(.bordered)
++            Spacer()
++            Text("Objects: \(arManager.objects.count)")
++                .font(.footnote)
++                .foregroundColor(.secondary)
++        }
++    }
++}
